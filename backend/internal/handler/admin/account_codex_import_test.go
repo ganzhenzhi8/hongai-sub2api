@@ -646,6 +646,11 @@ func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwo
 	if svc.createdAccounts[0].Credentials["chatgpt_user_id"] == svc.createdAccounts[1].Credentials["chatgpt_user_id"] {
 		t.Fatalf("created accounts share user id: %v", svc.createdAccounts)
 	}
+	for i, account := range svc.createdAccounts {
+		if got := account.Extra["codex_fingerprint_mode"]; got != "session" {
+			t.Fatalf("created account %d fingerprint mode = %v, want session", i, got)
+		}
+	}
 }
 
 func TestImportCodexSessionsAccessTokenOnlySameWorkspaceAndUserDifferentTokensCreatesTwoAccounts(t *testing.T) {
@@ -697,7 +702,10 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 			"chatgpt_user_id":    "user-1",
 			"access_token":       existingToken,
 		},
-		Extra: map[string]any{"openai_long_context_billing_enabled": false},
+		Extra: map[string]any{
+			"openai_long_context_billing_enabled": false,
+			"codex_fingerprint_mode":              "off",
+		},
 	}})
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
@@ -720,6 +728,9 @@ func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T)
 	}
 	if got := svc.updatedAccounts[0].input.Extra["openai_long_context_billing_enabled"]; got != false {
 		t.Fatalf("openai_long_context_billing_enabled = %v, want false", got)
+	}
+	if got := svc.updatedAccounts[0].input.Extra["codex_fingerprint_mode"]; got != "session" {
+		t.Fatalf("codex_fingerprint_mode = %v, want session", got)
 	}
 }
 

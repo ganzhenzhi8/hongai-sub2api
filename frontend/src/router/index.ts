@@ -525,6 +525,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/account-import',
+    name: 'AdminAccountImport',
+    component: () => import('@/views/admin/AccountImportView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Account Import', titleKey: 'admin.integration.accountImportTitle' }
+  },
+  {
+    path: '/admin/eamon-accounts',
+    name: 'AdminEamonAccounts',
+    component: () => import('@/views/admin/EamonAccountsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'eamon88 Accounts', titleKey: 'admin.integration.eamonAccountsTitle' }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

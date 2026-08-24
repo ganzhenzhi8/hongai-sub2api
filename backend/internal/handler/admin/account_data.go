@@ -428,6 +428,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		enrichCredentialsFromIDToken(&item)
+		item.Extra = forceImportedCodexFingerprintSession(item.Platform, item.Type, item.Extra)
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,

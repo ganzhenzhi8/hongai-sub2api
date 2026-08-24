@@ -316,4 +316,5 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+	require.Equal(t, "session", adminSvc.createdAccounts[0].Extra["codex_fingerprint_mode"])
 }

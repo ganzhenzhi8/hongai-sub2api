@@ -3346,8 +3346,20 @@
         </div>
 
         <!-- Group Selection - 仅标准模式显示 -->
+        <div v-if="!authStore.isSimpleMode && groupTargets?.length" class="space-y-4" data-tour="account-form-groups">
+          <GroupSelector
+            v-for="target in groupTargets"
+            :key="target.key"
+            :model-value="targetGroupIDs[target.key] || []"
+            :groups="target.groups"
+            :platform="form.platform"
+            :mixed-scheduling="mixedScheduling"
+            :label="target.label"
+            @update:model-value="setTargetGroupIDs(target.key, $event)"
+          />
+        </div>
         <GroupSelector
-          v-if="!authStore.isSimpleMode"
+          v-else-if="!authStore.isSimpleMode"
           v-model="form.group_ids"
           :groups="groups"
           :platform="form.platform"
@@ -3375,10 +3387,10 @@
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
-        :show-codex-session-import-option="form.platform === 'openai'"
+        :show-codex-session-import-option="form.platform === 'openai' && !createOverride"
         :show-agent-identity-option="form.platform === 'openai'"
-        :show-codex-pat-option="form.platform === 'openai'"
-        :show-sso-option="form.platform === 'grok'"
+        :show-codex-pat-option="form.platform === 'openai' && !createOverride"
+        :show-sso-option="form.platform === 'grok' && !createOverride"
         :show-email-password-option="false"
         :show-manual-option="true"
         :initial-input-method="'manual'"
@@ -3870,6 +3882,8 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  groupTargets?: Array<{ key: string; label: string; groups: AdminGroup[] }>
+  createOverride?: (payload: CreateAccountRequest, groupIDsByTarget: Record<string, number[]>) => Promise<void>
 }
 
 const props = defineProps<Props>()
@@ -3879,6 +3893,29 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const targetGroupIDs = reactive<Record<string, number[]>>({})
+
+const setTargetGroupIDs = (key: string, value: number[]) => {
+  targetGroupIDs[key] = [...value]
+}
+
+const snapshotTargetGroupIDs = () => Object.fromEntries(
+  (props.groupTargets || []).map((target) => [target.key, [...(targetGroupIDs[target.key] || [])]])
+)
+
+watch(
+  () => props.groupTargets?.map((target) => target.key) || [],
+  (keys) => {
+    const active = new Set(keys)
+    for (const key of Object.keys(targetGroupIDs)) {
+      if (!active.has(key)) delete targetGroupIDs[key]
+    }
+    for (const key of keys) {
+      if (!targetGroupIDs[key]) targetGroupIDs[key] = []
+    }
+  },
+  { immediate: true }
+)
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -4938,6 +4975,9 @@ const withAntigravityConfirmFlag = (payload: CreateAccountRequest): CreateAccoun
 }
 
 const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<void>): Promise<boolean> => {
+  if (props.createOverride) {
+    return true
+  }
   if (!needsMixedChannelCheck(form.platform)) {
     return true
   }
@@ -4967,11 +5007,21 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
   }
 }
 
+const createUsingConfiguredTarget = async (payload: CreateAccountRequest) => {
+  const submittedPayload = withAntigravityConfirmFlag(payload)
+  if (props.createOverride) {
+    await props.createOverride(submittedPayload, snapshotTargetGroupIDs())
+    return null
+  }
+  return adminAPI.accounts.create(submittedPayload)
+}
+
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    const account = await createUsingConfiguredTarget(payload)
     if (
+      account &&
       payload.type === 'apikey' &&
       payload.upstream_billing_probe_enabled === true
     ) {
@@ -4995,7 +5045,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       })
       return
     }
-    appStore.showError(error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
+    appStore.showError(error.response?.data?.message || error.response?.data?.detail || error.message || t('admin.accounts.failedToCreate'))
   } finally {
     submitting.value = false
   }
@@ -5015,6 +5065,7 @@ const resetForm = () => {
   form.priority = 1
   form.rate_multiplier = 1
   form.group_ids = []
+  for (const key of Object.keys(targetGroupIDs)) targetGroupIDs[key] = []
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
@@ -5743,7 +5794,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await createUsingConfiguredTarget({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -5920,7 +5971,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await createUsingConfiguredTarget({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6019,7 +6070,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await createUsingConfiguredTarget({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6300,7 +6351,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await createUsingConfiguredTarget({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6415,7 +6466,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await adminAPI.accounts.create(createPayload)
+        await createUsingConfiguredTarget(createPayload)
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6780,7 +6831,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        await createUsingConfiguredTarget({
           name: accountName,
           notes: form.notes,
           platform: form.platform,

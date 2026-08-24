@@ -276,6 +276,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			}
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			mergedExtra = forceImportedCodexFingerprintSession(service.PlatformOpenAI, service.AccountTypeOAuth, mergedExtra)
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -334,7 +335,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			Platform:              service.PlatformOpenAI,
 			Type:                  service.AccountTypeOAuth,
 			Credentials:           credentials,
-			Extra:                 extra,
+			Extra:                 forceImportedCodexFingerprintSession(service.PlatformOpenAI, service.AccountTypeOAuth, extra),
 			ProxyID:               req.ProxyID,
 			Concurrency:           concurrency,
 			Priority:              priority,

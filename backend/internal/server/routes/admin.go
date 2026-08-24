@@ -43,6 +43,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
+		// Cross-site account import and eamon88 management (admin JWT only).
+		registerIntegrationAdminRoutes(admin, h)
+
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 
