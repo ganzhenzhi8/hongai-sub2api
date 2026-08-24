@@ -1,0 +1,48 @@
+version: 2
+
+project_name: sub2api
+
+builds:
+  - id: sub2api
+    dir: backend
+    main: ./cmd/server
+    binary: sub2api
+    flags:
+      - -tags=embed
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.Date={{.Date}}
+      - -X main.BuildType=release
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  draft: false
+  prerelease: false
+  name_template: "Hongai Sub2API {{ .Version }}"
+  header: |
+    本版本由 hongai 自动同步流程构建。它包含当前 Sub2API overdraft 上游代码及 hongai 定制功能。
+
+    只有在后端测试和前端生产构建全部通过后才会发布。

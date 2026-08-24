@@ -1,0 +1,135 @@
+name: Sync upstream and publish Hongai update
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Publish even when upstream has not changed
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hongai-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-test-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Hongai branch
+        uses: actions/checkout@v6
+        with:
+          ref: hongai
+          fetch-depth: 0
+
+      - name: Merge latest overdraft source
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "hongai-update-bot"
+          git config user.email "hongai-update-bot@users.noreply.github.com"
+          git remote add overdraft https://github.com/DeanZFC/sub2api-overdraft.git
+          git fetch --no-tags overdraft codex-overdraft
+
+          before=$(git rev-parse HEAD)
+          if ! git merge --no-edit overdraft/codex-overdraft; then
+            git status --short
+            git merge --abort
+            echo "Upstream merge has conflicts. No release was published." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          after=$(git rev-parse HEAD)
+
+          publish=false
+          if [[ "$before" != "$after" || "${{ inputs.force_release || false }}" == "true" ]]; then
+            publish=true
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Choose next Hongai version
+        id: version
+        if: steps.merge.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_version=$(git show overdraft/codex-overdraft:FORK_VERSION | tr -d '[:space:]')
+          core=$(printf '%s' "$upstream_version" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+          if [[ -z "$core" ]]; then
+            echo "Cannot derive a semantic version core from $upstream_version" >&2
+            exit 1
+          fi
+
+          counter=0
+          while IFS= read -r tag; do
+            value=${tag##*.}
+            if [[ "$value" =~ ^[0-9]+$ && "$value" -gt "$counter" ]]; then
+              counter=$value
+            fi
+          done < <(git tag --list "v${core}-overdraft.hongai.*")
+          counter=$((counter + 1))
+          version="${core}-overdraft.hongai.${counter}"
+          tag="v${version}"
+
+          printf '%s\n' "$version" > HONGAI_VERSION
+          git add HONGAI_VERSION
+          git commit -m "chore(release): prepare ${tag}"
+          git tag -a "$tag" -m "Hongai update based on overdraft ${upstream_version}"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Publishing $tag from overdraft $upstream_version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up pnpm
+        if: steps.merge.outputs.publish == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        if: steps.merge.outputs.publish == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        if: steps.merge.outputs.publish == 'true'
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Set up Go
+        if: steps.merge.outputs.publish == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test backend
+        if: steps.merge.outputs.publish == 'true'
+        working-directory: backend
+        run: go test -tags=unit ./...
+
+      - name: Push tested source and tag
+        if: steps.merge.outputs.publish == 'true'
+        run: |
+          git push origin HEAD:hongai
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish update assets
+        if: steps.merge.outputs.publish == 'true'
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean --skip=validate --config=.goreleaser.hongai.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

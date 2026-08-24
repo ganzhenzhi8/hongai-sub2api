@@ -151,6 +151,12 @@ func TestCompareVersionsSupportsForkPrereleaseRevisions(t *testing.T) {
 	require.Greater(t, compareVersions("0.1.177-overdraft.1", "0.1.176-overdraft.9"), 0)
 }
 
+func TestCompareVersionsSupportsHongaiReleaseSequence(t *testing.T) {
+	require.Less(t, compareVersions("0.1.179-overdraft.3-crosssite.4", "0.1.179-overdraft.hongai.1"), 0)
+	require.Less(t, compareVersions("0.1.179-overdraft.hongai.1", "0.1.179-overdraft.hongai.2"), 0)
+	require.Less(t, compareVersions("0.1.179-overdraft.hongai.99", "0.1.180-overdraft.hongai.1"), 0)
+}
+
 func newRollbackTestService(current string, releases []*GitHubRelease) *UpdateService {
 	return NewUpdateService(
 		&updateServiceCacheStub{},
