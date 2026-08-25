@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-overdraft.hongai.*'
   workflow_dispatch:
     inputs:
       tag:
