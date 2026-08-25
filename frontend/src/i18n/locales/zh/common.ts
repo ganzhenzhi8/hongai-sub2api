@@ -170,6 +170,7 @@ export default {
     accounts: '账号管理',
     accountImport: '账号导入',
     eamonAccounts: 'eamon88 账号管理',
+    plugins: '插件管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -231,6 +232,8 @@ export default {
       USER_NOT_ACTIVE: '账号已被禁用',
     },
     registrationFailed: '注册失败，请重试。',
+    emailDomainRegistrationLimit:
+      '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。',
     emailSuffixNotAllowed: '该邮箱域名不在允许注册范围内。',
     emailSuffixNotAllowedWithAllowed: '该邮箱域名不被允许。可用域名：{suffixes}',
     emailSuffixAllowedMore: '等 {count} 项',
