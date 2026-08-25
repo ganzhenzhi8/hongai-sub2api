@@ -42,29 +42,12 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, request any, r
 			return fmt.Errorf("encode integration request: %w", err)
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, bytes.NewReader(body))
+	status, _, respBody, err := c.DoRaw(ctx, method, path, body)
 	if err != nil {
-		return fmt.Errorf("create integration request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Sub2API-Integration/1.0")
-	req.Header.Set(integrationauth.HeaderID, c.ID)
-	nonce, err := randomNonce()
-	if err != nil {
-		return fmt.Errorf("create integration nonce: %w", err)
-	}
-	integrationauth.SignRequest(req, c.Secret, body, time.Now(), nonce)
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("integration request failed")
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return fmt.Errorf("read integration response")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("integration request returned status %d", resp.StatusCode)
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("integration request returned status %d", status)
 	}
 	if response != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, response); err != nil {
@@ -72,6 +55,45 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, request any, r
 		}
 	}
 	return nil
+}
+
+// DoRaw performs one signed integration request while preserving the remote
+// status, headers, and response body. It is used by the restricted admin
+// bridge so the original Sub2API frontend receives the same payload shape as
+// it would from a local admin endpoint.
+func (c *Client) DoRaw(ctx context.Context, method, path string, body []byte) (int, http.Header, []byte, error) {
+	resp, err := c.Do(ctx, method, path, body)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("read integration response")
+	}
+	return resp.StatusCode, resp.Header.Clone(), respBody, nil
+}
+
+// Do returns the signed response without consuming its body. Callers must
+// close the body; the admin bridge uses this form to preserve SSE streaming.
+func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create integration request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Sub2API-Integration/1.0")
+	req.Header.Set(integrationauth.HeaderID, c.ID)
+	nonce, err := randomNonce()
+	if err != nil {
+		return nil, fmt.Errorf("create integration nonce: %w", err)
+	}
+	integrationauth.SignRequest(req, c.Secret, body, time.Now(), nonce)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("integration request failed")
+	}
+	return resp, nil
 }
 
 func randomNonce() (string, error) {

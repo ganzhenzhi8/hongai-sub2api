@@ -38,8 +38,35 @@ const getUserTimezone = (): string => {
   }
 }
 
+const eamonAdminPathPrefixes = [
+  '/admin/accounts',
+  '/admin/groups/all',
+  '/admin/proxies/all',
+  '/admin/scheduled-test-plans',
+  '/admin/grok',
+  '/admin/cn-providers',
+  '/admin/settings/web-search-emulation',
+  '/admin/error-passthrough-rules',
+  '/admin/tls-fingerprint-profiles'
+]
+
+const shouldUseEamonAdminBridge = (url: string, pathname: string): boolean => {
+  if (pathname !== '/admin/eamon-accounts') return false
+  const path = url.split('?', 1)[0]
+  return eamonAdminPathPrefixes.some(prefix => path === prefix || path.startsWith(`${prefix}/`))
+}
+
+export const resolveAdminRequestPath = (url: string, pathname?: string): string => {
+  const currentPath = pathname ?? (typeof window === 'undefined' ? '' : window.location.pathname)
+  if (!shouldUseEamonAdminBridge(url, currentPath)) return url
+  return `/admin/integration/eamon/proxy${url.slice('/admin'.length)}`
+}
+
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const originalURL = String(config.url || '')
+    config.url = resolveAdminRequestPath(originalURL)
+
     // Attach token from localStorage
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {

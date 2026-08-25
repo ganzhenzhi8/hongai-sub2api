@@ -76,6 +76,17 @@ func (h *AccountHandler) verifyIntegration(c *gin.Context) bool {
 	return true
 }
 
+// IntegrationAuth protects the full-fidelity account management bridge. The
+// receiver remains disabled unless the explicit integration environment gate
+// is enabled, and every request is signed and replay-protected.
+func (h *AccountHandler) IntegrationAuth(c *gin.Context) {
+	if !h.verifyIntegration(c) {
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func (h *AccountHandler) IntegrationHealth(c *gin.Context) {
 	if !h.verifyIntegration(c) {
 		return
@@ -205,21 +216,21 @@ func (h *AccountHandler) IntegrationCreateAccount(c *gin.Context) {
 }
 
 type integrationAccountUpdateRequest struct {
-	Name           string          `json:"name"`
-	Notes          *string         `json:"notes"`
-	Type           string          `json:"type"`
-	Credentials    map[string]any  `json:"credentials"`
-	Extra          map[string]any  `json:"extra"`
-	ProxyID        *int64          `json:"proxy_id"`
-	Concurrency    *int            `json:"concurrency"`
-	Priority       *int            `json:"priority"`
-	RateMultiplier *float64        `json:"rate_multiplier"`
-	LoadFactor     *int            `json:"load_factor"`
-	Status         string          `json:"status"`
-	GroupIDs       *[]int64        `json:"group_ids"`
-	ExpiresAt      *int64          `json:"expires_at"`
-	AutoPause      *bool           `json:"auto_pause_on_expired"`
-	Schedulable    *bool           `json:"schedulable"`
+	Name           string         `json:"name"`
+	Notes          *string        `json:"notes"`
+	Type           string         `json:"type"`
+	Credentials    map[string]any `json:"credentials"`
+	Extra          map[string]any `json:"extra"`
+	ProxyID        *int64         `json:"proxy_id"`
+	Concurrency    *int           `json:"concurrency"`
+	Priority       *int           `json:"priority"`
+	RateMultiplier *float64       `json:"rate_multiplier"`
+	LoadFactor     *int           `json:"load_factor"`
+	Status         string         `json:"status"`
+	GroupIDs       *[]int64       `json:"group_ids"`
+	ExpiresAt      *int64         `json:"expires_at"`
+	AutoPause      *bool          `json:"auto_pause_on_expired"`
+	Schedulable    *bool          `json:"schedulable"`
 }
 
 func (h *AccountHandler) IntegrationUpdateAccount(c *gin.Context) {
@@ -398,6 +409,84 @@ func (h *AccountHandler) IntegrationRemoteDelete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// IntegrationRemoteAdminProxy forwards only the account-management routes
+// that are registered by RegisterIntegrationRoutes. It never exposes a
+// caller-controlled host and therefore cannot be used as a general proxy.
+func (h *AccountHandler) IntegrationRemoteAdminProxy(c *gin.Context) {
+	client, err := remoteIntegrationClient()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "eamon integration disabled"})
+		return
+	}
+
+	bridgePath := "/" + strings.TrimLeft(c.Param("path"), "/")
+	if !integrationAdminPathAllowed(bridgePath) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "integration admin route not available"})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 32<<20))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+	remotePath := "/api/v1/integration/admin" + bridgePath
+	if rawQuery := c.Request.URL.Query().Encode(); rawQuery != "" {
+		remotePath += "?" + rawQuery
+	}
+	resp, err := client.Do(c.Request.Context(), c.Request.Method, remotePath, body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "eamon account management unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json; charset=utf-8"
+	}
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		c.Header("ETag", etag)
+	}
+	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
+		c.Header("Cache-Control", cacheControl)
+	}
+	c.Header("Content-Type", contentType)
+	c.Status(resp.StatusCode)
+	remaining := int64(32 << 20)
+	buffer := make([]byte, 32<<10)
+	for remaining > 0 {
+		readCount, readErr := resp.Body.Read(buffer)
+		if readCount > 0 {
+			if _, writeErr := c.Writer.Write(buffer[:readCount]); writeErr != nil {
+				return
+			}
+			c.Writer.Flush()
+			remaining -= int64(readCount)
+		}
+		if readErr != nil {
+			return
+		}
+	}
+}
+
+func integrationAdminPathAllowed(path string) bool {
+	for _, prefix := range []string{
+		"/accounts",
+		"/groups/all",
+		"/proxies/all",
+		"/scheduled-test-plans",
+		"/grok",
+		"/cn-providers",
+		"/settings/web-search-emulation",
+		"/error-passthrough-rules",
+		"/tls-fingerprint-profiles",
+	} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseIntegrationInt(raw string, fallback int) int {

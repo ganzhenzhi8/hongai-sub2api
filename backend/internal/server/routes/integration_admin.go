@@ -16,5 +16,6 @@ func registerIntegrationAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers)
 		integration.POST("/accounts", h.Admin.Account.IntegrationPushAccount)
 		integration.PUT("/accounts/:id", h.Admin.Account.IntegrationRemoteUpdate)
 		integration.DELETE("/accounts/:id", h.Admin.Account.IntegrationRemoteDelete)
+		integration.Any("/proxy/*path", h.Admin.Account.IntegrationRemoteAdminProxy)
 	}
 }
